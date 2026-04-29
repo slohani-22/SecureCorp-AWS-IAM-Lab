@@ -26,6 +26,15 @@ A comprehensive enterprise Identity and Access Management security environment b
 AWS IAM · IAM Identity Center · S3 · EC2 · Lambda · DynamoDB · CloudTrail · CloudWatch · GuardDuty · Security Hub · IAM Access Analyzer · Secrets Manager · AWS Organizations · SNS · EventBridge · SQS · Terraform · GitHub Actions · Microsoft Entra ID · Microsoft Sentinel
 
 ---
+---
+
+## Project Background
+
+This project was originally designed as a Microsoft Entra ID identity governance lab. During initial implementation, critical IAM features — Conditional Access policies, Privileged Identity Management, and enterprise SAML SSO — required Azure AD P1/P2 licensing unavailable on personal Microsoft accounts, blocking a complete implementation.
+
+Rather than compromise the scope, the project was rebuilt on AWS IAM, which provides equivalent enterprise identity controls with no licensing tiers at any step. Microsoft Entra ID was retained as the external SAML identity provider federated to AWS IAM Identity Center — meaning both cloud identity platforms are represented in the final architecture, with AWS handling identity governance and Entra ID serving as the workforce identity provider.
+
+---
 
 ## Environment Summary
 
@@ -323,7 +332,7 @@ AWS API call → CloudTrail → S3 bucket → SQS notification
 - Azure: Activity logs, Entra ID sign-in logs, Defender for Cloud
 - AWS: CloudTrail API audit, GuardDuty threat findings
 
-**Related project:** [Microsoft Sentinel SIEM Lab](https://github.com/slohani-22) — 13 custom KQL detection rules, 8-stage kill chain simulation, automated incident response via Logic Apps and Microsoft Graph API
+**Related project:** [Microsoft Sentinel SIEM Lab](https://github.com/slohani-22/Microsoft-Sentinel-SIEM-Lab) — Production-grade cloud SOC with 16 custom KQL rules, 8-stage MITRE ATT&CK kill chain simulation, 3 incident investigations, SOAR playbook with Graph API automation, VNet flow logs, DNS logging, and Azure Firewall integration
 
 ---
 
