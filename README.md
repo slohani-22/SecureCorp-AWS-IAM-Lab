@@ -19,6 +19,13 @@ A comprehensive enterprise Identity and Access Management security environment b
 - CloudTrail detection rules mapped to MITRE ATT&CK framework
 - Cross-cloud monitoring — AWS CloudTrail events ingested into Microsoft Sentinel
 
+## IAM Domain Coverage
+
+| Domain | Implemented In This Lab |
+|---|---|
+| **Access Management** | SAML 2.0 federation (Entra ID → IAM Identity Center), OIDC federation for CI/CD, permission sets, MFA enforcement, conditional access via IP/time/MFA condition keys |
+| **Identity Governance & Administration** | JIT access request-approval-expiry workflow, automated joiner provisioning on CreateUser, stale access detection and reporting, Access Analyzer findings review, credential audit |
+| **Cloud IAM** | Group-based RBAC with scoped custom policies, permission boundaries, Service Control Policies, Secrets Manager with rotation, role-based credential retrieval |
 ---
 
 ## Tech Stack
