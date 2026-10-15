@@ -39,7 +39,7 @@ Rather than compromise the scope, the project was rebuilt on AWS IAM, which prov
 
 | Component | Details |
 |---|---|
-| AWS Account | 318731645112 |
+| AWS Account | 3187******** |
 | Primary Region | us-east-1 |
 | IAM Users | 5 (4 department + 1 break-glass) |
 | IAM Groups | 4 |
