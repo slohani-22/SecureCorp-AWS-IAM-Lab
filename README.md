@@ -6,6 +6,8 @@ A comprehensive enterprise Identity and Access Management security environment b
 **Certifications:** CompTIA Security+ · AZ-500
 **Target Roles:** IAM Analyst · Cloud Security Engineer · SOC Analyst
 
+> **Status:** Built April 2026. Decommissioned October 2026. In October 2026 I reviewed the lab against what was actually running in the account and found that parts of the Lambda automation did not work the way I originally documented. Those are written up in [Lessons Learned](#lessons-learned-post-project-review-october-2026), and the claims below have been corrected to match.
+
 ---
 
 ## What This Project Demonstrates
@@ -14,7 +16,7 @@ A comprehensive enterprise Identity and Access Management security environment b
 - Permission boundaries and SCPs as independent defense-in-depth layers
 - SAML federation connecting Microsoft Entra ID to AWS IAM Identity Center
 - OIDC federation for credential-free GitHub Actions CI/CD pipelines
-- Just-In-Time access automation with approval workflow, DynamoDB state tracking, and auto-expiry
+- Just-In-Time access request and approval workflow with DynamoDB state tracking (automatic expiry did not work; see Lessons Learned)
 - Secrets management — EC2 retrieves credentials via IAM role, no hardcoded keys anywhere
 - CloudTrail detection rules mapped to MITRE ATT&CK framework
 - Cross-cloud monitoring — AWS CloudTrail events ingested into Microsoft Sentinel
@@ -24,8 +26,9 @@ A comprehensive enterprise Identity and Access Management security environment b
 | Domain | Implemented In This Lab |
 |---|---|
 | **Access Management** | SAML 2.0 federation (Entra ID → IAM Identity Center), OIDC federation for CI/CD, permission sets, MFA enforcement, conditional access via IP/time/MFA condition keys |
-| **Identity Governance & Administration** | JIT access request-approval-expiry workflow, automated joiner provisioning on CreateUser, stale access detection and reporting, Access Analyzer findings review, credential audit |
-| **Cloud IAM** | Group-based RBAC with scoped custom policies, permission boundaries, Service Control Policies, Secrets Manager with rotation, role-based credential retrieval |
+| **Identity Governance & Administration** | JIT access request-approval workflow, automated joiner provisioning on CreateUser, stale access detection and reporting, Access Analyzer findings review, credential audit |
+| **Cloud IAM** | Group-based RBAC with scoped custom policies, permission boundaries, Service Control Policies, Secrets Manager with role-based credential retrieval |
+
 ---
 
 ## Tech Stack
@@ -52,7 +55,7 @@ Rather than compromise the scope, the project was rebuilt on AWS IAM, which prov
 | IAM Groups | 4 |
 | Custom IAM Policies | 10 |
 | SCPs | 4 |
-| Lambda Functions | 5 |
+| Lambda Functions | 6 (5 governance functions + 1 rotation function that was never implemented) |
 | CloudWatch Alarms | 6 |
 | DynamoDB Tables | 1 |
 | SNS Topics | 2 |
@@ -176,21 +179,21 @@ Added defense-in-depth controls that enforce least privilege even if a policy is
 
 ## Governance Automation
 
-Automated the full access lifecycle — request, approval, grant, expiry, stale detection, and new user onboarding.
+Automated access request, approval, grant, stale access detection, and new user onboarding. The Lambda code is in [`lambda/as-deployed/`](lambda/as-deployed/), exactly as it ran (only the account-specific ARNs were moved to environment variables).
 
-**JIT Access Workflow:**
+**JIT Access Workflow (as designed):**
 
 ```
 Request submitted → Lambda stores in DynamoDB (PENDING)
 → SNS approval email sent
 → Approver invokes Grant Lambda (APPROVE/DENY)
 → Policy attached to user, expiry scheduled in EventBridge
-→ Revoke Lambda fires at expiry
+→ Revoke Lambda fires at expiry            ← this step never happened
 → Policy detached, DynamoDB updated (REVOKED)
 → SNS revocation notification sent
 ```
 
-End-to-end test: dev.user requested AmazonS3ReadOnlyAccess for 5 minutes. Approval email received. Policy attached. Auto-revoked at expiry. Full record in DynamoDB.
+Test: dev.user requested AmazonS3ReadOnlyAccess for 5 minutes. The request, approval email, policy attachment, and DynamoDB record all worked. **The automatic revocation did not.** The policy stayed attached until I found it during the October 2026 review, about 170 days later. Details in Lessons Learned.
 
 **Stale Access Detector:** Weekly EventBridge schedule triggers Lambda, queries IAM credential report, flags users inactive 30+ days, writes JSON report to S3, sends SNS notification.
 
@@ -219,7 +222,7 @@ End-to-end test: dev.user requested AmazonS3ReadOnlyAccess for 5 minutes. Approv
 **Secrets Manager:**
 
 - Secret `securecorp/db/password` stores simulated database credentials
-- 30-day automatic rotation enabled
+- 30-day rotation was turned on in Secrets Manager, but the rotation Lambda was never written (it is still the default AWS template), so no rotation actually happened. See Lessons Learned.
 - EC2 instance retrieves secret via IAM instance profile role — no access keys, no hardcoded credentials anywhere
 
 **Retrieval demonstration (run on EC2 via Session Manager):**
@@ -360,9 +363,10 @@ AWS API call → CloudTrail → S3 bucket → SQS notification
 ## Repository Structure
 
 ```
-securecorp-aws-iam-lab/
+Securecorp-aws-iam-lab/
 ├── README.md
 ├── terraform/                        # IaC for all resources
+├── lambda/as-deployed/               # The 6 Lambda functions exactly as they ran
 ├── documentation/                    # Runbook, MITRE mapping, investigations
 ├── sample-data/                      # Simulated SecureCorp data files
 ├── reports/                          # Generated stale access report
@@ -389,3 +393,35 @@ securecorp-aws-iam-lab/
 **OIDC over stored access keys for GitHub Actions:** An access key stored in GitHub Secrets is a long-lived credential. An OIDC token is generated fresh for each workflow run and expires when the run ends — nothing to steal.
 
 **JIT access over standing permissions:** Standing elevated access means a compromised account has that access immediately. JIT access means elevated permissions exist only for an approved, time-limited window — attack surface is minimized.
+
+---
+
+## Lessons Learned: Post-Project Review (October 2026)
+
+Six months after building this lab, I went back through the account before shutting it down and compared what I had documented with what was actually configured. Two parts of the Lambda automation did not work the way I wrote them up.
+
+### 1. JIT access was never revoked
+
+**What I documented:** A 5-minute grant that was automatically revoked at expiry.
+
+**What actually happened:** The grant was never revoked. When I checked in October 2026:
+- The DynamoDB record for the test request still said `APPROVED`, with no `revokedAt` time.
+- `AmazonS3ReadOnlyAccess` was still attached to `dev.user`, about 170 days after it should have been removed.
+- The EventBridge rule `JIT-Revoke-271498b5` existed, ran on `rate(5 minutes)`, and had **zero targets**.
+
+**Why:** In `jit_access_grant.py`, I created the EventBridge rule with `put_rule` but never called `put_targets`, so the rule fired every 5 minutes and invoked nothing. The function even defines `REVOKE_LAMBDA_ARN` and never uses it. Two more problems would have stopped it even with a target: the rule didn't pass the `requestId` that the revoke function needs, and `rate()` repeats forever instead of firing once.
+
+**Impact:** `dev.user` had no access keys and had never signed in with its password, so the extra access was never used. I detached the policy and deleted the rule.
+
+**What I learned:** The grant Lambda returned 200 and the approval email arrived, so I assumed the whole flow worked. I never checked whether the policy was actually removed afterwards. Next time I would:
+- verify the end state in IAM itself, not just the function's response
+- use a one-time EventBridge Scheduler schedule with the revoke function as the target and the `requestId` as input
+- run a periodic check comparing DynamoDB records against the policies actually attached in IAM, which would have caught this on day one
+
+### 2. Secrets rotation was never implemented
+
+The `SecureCorp-SecretsRotation` function is still the default "Hello from Lambda" template (see [`secrets_rotation_stub.mjs`](lambda/as-deployed/secrets_rotation_stub.mjs)). Rotation was switched on in Secrets Manager, but a real rotation function has to handle four steps (`createSecret`, `setSecret`, `testSecret`, `finishSecret`), and this one did none of them. No rotation ever happened. The part that did work is the EC2 instance reading the secret through its IAM role, with no access keys involved.
+
+### The main takeaway
+
+A function returning success is not the same as the security control working. Both of these passed a quick test when I built them and failed when I checked the actual state of the account months later.
